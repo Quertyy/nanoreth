@@ -7,7 +7,7 @@ use reth_db_api::{Database, transaction::DbTxMut};
 use reth_primitives::TransactionSigned as RethTxSigned;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, LazyLock, Mutex, RwLock},
 };
 use tracing::info;
@@ -128,6 +128,8 @@ pub struct SealedBlock {
 
 static SPOT_EVM_MAP: LazyLock<Arc<RwLock<BTreeMap<Address, SpotId>>>> =
     LazyLock::new(|| Arc::new(RwLock::new(BTreeMap::new())));
+static NON_SPOT_SYSTEM_TX_DESTINATIONS: LazyLock<Arc<RwLock<BTreeSet<Address>>>> =
+    LazyLock::new(|| Arc::new(RwLock::new(BTreeSet::new())));
 
 // Optional database handle for persisting on-demand fetches
 static DB_HANDLE: LazyLock<Mutex<Option<Arc<DatabaseEnv>>>> = LazyLock::new(|| Mutex::new(None));
@@ -185,16 +187,22 @@ fn system_tx_to_reth_transaction(transaction: &SystemTx, chain_id: u64) -> TxSig
     let s = if tx.input.is_empty() {
         U256::from(0x1)
     } else {
-        loop {
-            if let Some(spot) = SPOT_EVM_MAP.read().unwrap().get(&to) {
-                break spot.to_s();
-            }
-
-            // Cache miss - fetch from API, update cache, and persist to database
-            info!("Contract not found: {to:?} from spot mapping, fetching from API...");
+        if let Some(spot) = SPOT_EVM_MAP.read().unwrap().get(&to) {
+            spot.to_s()
+        } else if NON_SPOT_SYSTEM_TX_DESTINATIONS.read().unwrap().contains(&to) {
+            U256::from(0x1)
+        } else {
             let metadata = erc20_contract_to_spot_token(chain_id).unwrap();
+            let spot_id = metadata.get(&to).cloned();
             *SPOT_EVM_MAP.write().unwrap() = metadata.clone();
             persist_spot_metadata_to_db(&metadata);
+
+            if let Some(spot) = spot_id {
+                spot.to_s()
+            } else {
+                NON_SPOT_SYSTEM_TX_DESTINATIONS.write().unwrap().insert(to);
+                U256::from(0x1)
+            }
         }
     };
     let signature = Signature::new(U256::from(0x1), s, true);
