@@ -1,12 +1,25 @@
 use alloy_primitives::{Address, U256};
 use eyre::{Error, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::{LazyLock, RwLock},
+};
 
 use crate::chainspec::{MAINNET_CHAIN_ID, TESTNET_CHAIN_ID};
 
 pub mod init;
 mod patch;
+
+static SPOT_META_API_URL: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
+
+pub fn set_spot_meta_api_url(url: Option<String>) {
+    let url = url.and_then(|url| {
+        let url = url.trim().to_owned();
+        (!url.is_empty()).then_some(url)
+    });
+    *SPOT_META_API_URL.write().unwrap() = url;
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EvmContract {
@@ -40,10 +53,14 @@ impl SpotId {
 }
 
 fn fetch_spot_meta(chain_id: u64) -> Result<SpotMeta> {
-    let url = match chain_id {
-        MAINNET_CHAIN_ID => "https://api.hyperliquid.xyz/info",
-        TESTNET_CHAIN_ID => "https://api.hyperliquid-testnet.xyz/info",
-        _ => return Err(Error::msg("unknown chain id")),
+    let custom_url = SPOT_META_API_URL.read().unwrap().clone();
+    let url = match custom_url.as_deref() {
+        Some(url) => url,
+        None => match chain_id {
+            MAINNET_CHAIN_ID => "https://api.hyperliquid.xyz/info",
+            TESTNET_CHAIN_ID => "https://api.hyperliquid-testnet.xyz/info",
+            _ => return Err(Error::msg("unknown chain id")),
+        },
     };
     let response = ureq::post(url)
         .header("Content-Type", "application/json")

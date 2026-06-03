@@ -19,7 +19,7 @@ use reth_hl::{
         HlNode,
         cli::{Cli, HlNodeArgs},
         rpc::precompile::{HlBlockPrecompileApiServer, HlBlockPrecompileExt},
-        spot_meta::init as spot_meta_init,
+        spot_meta::{self, init as spot_meta_init},
         storage::tables::Tables,
         types::set_spot_metadata_db,
     },
@@ -53,6 +53,8 @@ fn main() -> eyre::Result<()> {
             let enable_sync_server = ext.enable_sync_server;
             let hl_node_compliant_default = ext.hl_node_compliant;
             let hl_multiplexed = ext.hl_node_compliant_multiplexed;
+
+            spot_meta::set_spot_meta_api_url(ext.spot_meta_api_url.clone());
 
             // Shared state to shuttle captured methods between hooks (only used in multiplexed mode)
             let captured: Arc<std::sync::Mutex<CapturedMethods>> =

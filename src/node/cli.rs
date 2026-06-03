@@ -1,8 +1,12 @@
 use crate::{
     chainspec::{HlChainSpec, parser::HlChainSpecParser},
     node::{
-        HlNode, consensus::HlConsensus, evm::config::HlEvmConfig, migrate::Migrator,
-        spot_meta::init as spot_meta_init, storage::tables::Tables,
+        HlNode,
+        consensus::HlConsensus,
+        evm::config::HlEvmConfig,
+        migrate::Migrator,
+        spot_meta::{self, init as spot_meta_init},
+        storage::tables::Tables,
     },
     pseudo_peer::BlockSourceArgs,
 };
@@ -37,6 +41,12 @@ macro_rules! not_applicable {
 pub struct HlNodeArgs {
     #[command(flatten)]
     pub block_source_args: BlockSourceArgs,
+
+    /// Custom Hyperliquid info API URL used for spot metadata.
+    ///
+    /// Defaults to the official mainnet/testnet info API URL for the selected chain.
+    #[arg(long, env = "SPOT_META_API_URL")]
+    pub spot_meta_api_url: Option<String>,
 
     /// Debug cutoff height.
     ///
@@ -182,8 +192,8 @@ where
                 // Validate file paths early with clear error messages.
                 // On Linux, File::open() succeeds on directories, then read_to_end()
                 // fails with a cryptic "Is a directory" error.
-                if command.without_evm
-                    && let Some(ref path) = command.header
+                if command.without_evm &&
+                    let Some(ref path) = command.header
                 {
                     if path.is_dir() {
                         return Err(eyre::eyre!(
@@ -254,6 +264,8 @@ where
         let db_path = data_dir.db();
         init_db(db_path.clone(), env.db.database_args())?;
         init_db_for::<_, Tables>(db_path.clone(), env.db.database_args())?;
+
+        spot_meta::set_spot_meta_api_url(std::env::var("SPOT_META_API_URL").ok());
 
         // Initialize spot metadata in database
         let chain_id = env.chain.chain().id();
